@@ -3,25 +3,24 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import os
 import cv2
-import logging  # <--- Для текстового логування
+import logging
 import time
-import traceback # Для запису помилок
+import traceback
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPool2D, Dense, Flatten, Dropout
+from tensorflow.keras.layers import Conv2D, MaxPool2D, Dense, Flatten, Dropout, BatchNormalization
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, CSVLogger # <--- Для запису таблиці
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, CSVLogger
 from sklearn.utils import class_weight
 
 # --- НАЛАШТУВАННЯ ЛОГУВАННЯ ---
-# Створюємо логер, який пише і в консоль, і у файл
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler("training_log.txt", mode='w', encoding='utf-8'), # Файл
-        logging.StreamHandler() # Консоль
+        logging.FileHandler("training_log.txt", mode='w', encoding='utf-8'),
+        logging.StreamHandler()
     ]
 )
 
@@ -33,11 +32,11 @@ IMG_HEIGHT = 80
 IMG_WIDTH = 80
 CHANNELS = 3
 NUM_CLASSES = 43
-EPOCHS = 20
+EPOCHS = 25
 BATCH_SIZE = 64
 
 def load_data():
-    logging.info(f"⏳ Починаю завантаження даних ({IMG_WIDTH}x{IMG_HEIGHT})...")
+    logging.info(f"⏳ Починаю завантаження даних ({IMG_WIDTH}x{IMG_HEIGHT}) RGB...")
     data = []
     labels = []
     
@@ -56,9 +55,10 @@ def load_data():
             try:
                 img_path = os.path.join(path, a)
                 image = cv2.imread(img_path)
-                # Конвертуємо в RGB
+                
+                # ВАЖЛИВО: Конвертуємо в RGB (щоб не плутати кольори)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                # Ресайз
+                # Ресайз до 80x80
                 image = cv2.resize(image, (IMG_WIDTH, IMG_HEIGHT))
                 
                 data.append(image)
@@ -76,24 +76,30 @@ def build_model():
     model = Sequential([
         # Блок 1
         Conv2D(32, (5, 5), activation='relu', input_shape=(IMG_HEIGHT, IMG_WIDTH, CHANNELS)),
+        BatchNormalization(),
         Conv2D(32, (5, 5), activation='relu'),
+        BatchNormalization(),
         MaxPool2D(pool_size=(2, 2)),
         Dropout(0.25),
 
         # Блок 2
         Conv2D(64, (3, 3), activation='relu'),
+        BatchNormalization(),
         Conv2D(64, (3, 3), activation='relu'),
+        BatchNormalization(),
         MaxPool2D(pool_size=(2, 2)),
         Dropout(0.25),
         
         # Блок 3
         Conv2D(128, (3, 3), activation='relu'),
+        BatchNormalization(),
         MaxPool2D(pool_size=(2, 2)),
         Dropout(0.25),
 
         # Класифікатор
         Flatten(),
         Dense(512, activation='relu'),
+        BatchNormalization(),
         Dropout(0.5),
         Dense(NUM_CLASSES, activation='softmax')
     ])
@@ -117,21 +123,29 @@ def main():
         
         # 2. Підготовка
         logging.info("🔄 Розділення та нормалізація даних...")
-       # БУЛО:
-        # X_train, X_val, y_train, y_val = train_test_split(data, labels, test_size=0.2, random_state=42)
-
-        # СТАЛО (Додано stratify=labels):
+        
+        # Використовуємо stratify для збереження пропорцій класів
         X_train, X_val, y_train, y_val = train_test_split(data, labels, test_size=0.2, stratify=labels, random_state=42)
         
         X_train = X_train / 255.0
         X_val = X_val / 255.0
         
+        # Обчислення ваг класів (для боротьби з дисбалансом)
+        logging.info("⚖️ Обчислення ваг класів...")
+        class_weights = class_weight.compute_class_weight(
+            class_weight='balanced',
+            classes=np.unique(y_train),
+            y=y_train
+        )
+        class_weights_dict = dict(enumerate(class_weights))
+
+        # One-hot encoding
         y_train = to_categorical(y_train, NUM_CLASSES)
         y_val = to_categorical(y_val, NUM_CLASSES)
         
         # 3. Модель
         model = build_model()
-        model.summary(print_fn=logging.info) # Записуємо структуру моделі в лог
+        model.summary(print_fn=logging.info)
         
         # 4. Аугментація
         datagen = ImageDataGenerator(
@@ -145,11 +159,9 @@ def main():
         if not os.path.exists(MODEL_DIR): os.makedirs(MODEL_DIR)
         checkpoint_path = os.path.join(MODEL_DIR, MODEL_NAME)
         
-        # --- КОЛБЕКИ ---
+        # Callbacks
         checkpoint = ModelCheckpoint(checkpoint_path, monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
         early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
-        
-        # CSV Logger: записує статистику кожної епохи в таблицю
         csv_logger = CSVLogger('training_metrics.csv', separator=',', append=False)
         
         # 6. Запуск навчання
@@ -160,7 +172,8 @@ def main():
             datagen.flow(X_train, y_train, batch_size=BATCH_SIZE),
             epochs=EPOCHS,
             validation_data=(X_val, y_val),
-            callbacks=[checkpoint, early_stop, csv_logger] # Додали csv_logger
+            callbacks=[checkpoint, early_stop, csv_logger],
+            class_weight=class_weights_dict
         )
         
         duration = time.time() - start_time
@@ -179,13 +192,13 @@ def main():
         plt.plot(history.history['val_loss'], label='Val Loss')
         plt.title('Loss (80x80)')
         plt.legend()
-        plt.savefig('training_plot.png') # Зберігаємо графік у файл!
+        plt.savefig('training_plot.png')
         logging.info("Графік збережено у training_plot.png")
         plt.show()
 
     except Exception as e:
         logging.error("❌ КРИТИЧНА ПОМИЛКА ПІД ЧАС ВИКОНАННЯ:")
-        logging.error(traceback.format_exc()) # Записуємо повний текст помилки
+        logging.error(traceback.format_exc())
 
 if __name__ == '__main__':
     main()
