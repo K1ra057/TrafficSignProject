@@ -12,6 +12,11 @@ MODEL_PATH = os.path.join('models', 'traffic_best_80x80.keras')
 IMG_HEIGHT = 80
 IMG_WIDTH = 80
 
+# Не забути сказати що
+# «HSV-дектор має обмеження при поганому освітленні або частковому попаданні знака в кадр.
+# У реальних системах для кращої детекції використовують окремі моделі (YOLO).
+# Але для лабораторної роботи кольорової маски достатньо.»
+
 classes = { 0:'Speed limit (20km/h)', 1:'Speed limit (30km/h)', 2:'Speed limit (50km/h)',
             3:'Speed limit (60km/h)', 4:'Speed limit (70km/h)', 5:'Speed limit (80km/h)',
             6:'End of speed limit (80km/h)', 7:'Speed limit (100km/h)', 8:'Speed limit (120km/h)',

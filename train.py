@@ -14,6 +14,8 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, CSVLogger
 from sklearn.utils import class_weight
 
+
+
 # --- НАЛАШТУВАННЯ ЛОГУВАННЯ ---
 logging.basicConfig(
     level=logging.INFO,
